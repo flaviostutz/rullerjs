@@ -1,0 +1,23 @@
+<html>
+    <script src="/rullerjs.js"></script>
+    <script>
+        input = {customerid: "123"}
+        r = new RullerJS("http://127.0.0.1:8080/rules/domains", 
+            input, 
+            (output) => {
+                console.log("OUTPUT CHANGED: " + JSON.stringify(output))
+                document.getElementById("status").innerText = JSON.stringify(output)
+            }, (err) => {
+                console.log("ERROR: " + err)
+            });
+        r.startPolling(1000)
+    </script>
+    <head>
+        <title>RullerJS Test</title>
+    </head>
+    <body>
+        <h3>RullerJS Demo</h3>
+        <h4>Current ruller output</h4>
+        <h5 id="status"></h5>
+    </body>
+</html>
