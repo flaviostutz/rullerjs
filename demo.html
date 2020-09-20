@@ -4,13 +4,15 @@
         input = {customerid: "123"}
         r = new RullerJS("http://127.0.0.1:8080/rules/domains", 
             input, 
+            20000, 
             (output) => {
                 console.log("OUTPUT CHANGED: " + JSON.stringify(output))
                 document.getElementById("status").innerText = JSON.stringify(output)
             }, (err) => {
                 console.log("ERROR: " + err)
             });
-        r.startPolling(1000)
+        console.log(">>> startMonitoring ws")
+        r.startMonitoring("ws://127.0.0.1:8080/ws")
     </script>
     <head>
         <title>RullerJS Test</title>
