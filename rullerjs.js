@@ -28,61 +28,31 @@ class RullerJS {
         this.cacheMillis = cacheMillis
 
         this.rullerWSURL = null
-        this.pollIntervalMillis = null
-        this.randomBackoffMaxMillis = null
+        this.backoffMinMillis = null
+        this.backoffMaxMillis = null
         this.maxRetryIntervalMillis = null
+
         this.retryCount = 0
         this.retryWaitTime = null
         this.currentTimer = null
 
-        this.currentTimer = null
+        if(cacheMillis == 0) {
+            localStorage.removeItem("rullerjs:lastData")
+        }
 
         this.poll(false);
     }
 
-    startPolling(pollIntervalMillis, randomBackoffMaxMillis, maxRetryIntervalMillis) {
-        this.stopMonitoring()
-        if(!pollIntervalMillis || pollIntervalMillis < 1000) {
-            throw "pollIntervalMillis is required and >= 1000ms"
+    startMonitoring(rullerWSURL, backoffMinMillis, backoffMaxMillis, maxRetryIntervalMillis) {
+        if(!backoffMinMillis) {
+            backoffMinMillis = 2000
         }
-        if(!randomBackoffMaxMillis) {
-            randomBackoffMaxMillis = pollIntervalMillis * 3
-        }
-        if(!maxRetryIntervalMillis) {
-            maxRetryIntervalMillis = pollIntervalMillis * 6
-        }
-        if(randomBackoffMaxMillis < pollIntervalMillis) {
-            throw "randomBackoffMaxMillis cannot be less than pollIntervalMillis"
-        }
-        if(maxRetryIntervalMillis < pollIntervalMillis) {
-            throw "randomBackoffMaxMillis cannot be less than pollIntervalMillis"
-        }
-        this.pollIntervalMillis = pollIntervalMillis
-        this.randomBackoffMaxMillis = randomBackoffMaxMillis
-        this.maxRetryIntervalMillis = maxRetryIntervalMillis
-        this.schedule(null, true)
-    }
-
-    stopPolling() {
-        if(this.currentTimer!=null) {
-            clearTimeout(this.currentTimer)
-            this.currentTimer = null
-        }
-        this.pollIntervalMillis = null
-        this.randomBackoffMaxMillis = null
-        this.maxRetryIntervalMillis = null
-    }
-
-    startMonitoring(rullerWSURL, randomBackoffMaxMillis, maxRetryIntervalMillis) {
-        this.stopPolling()
-        if(!randomBackoffMaxMillis) {
-            randomBackoffMaxMillis = 12000
-        }
-        if(!maxRetryIntervalMillis) {
-            maxRetryIntervalMillis = 30000
+        if(!backoffMaxMillis) {
+            backoffMaxMillis = 20000
         }
         this.rullerWSURL = rullerWSURL
-        this.randomBackoffMaxMillis = randomBackoffMaxMillis
+        this.backoffMinMillis = backoffMinMillis
+        this.backoffMaxMillis = backoffMaxMillis
         this.maxRetryIntervalMillis = maxRetryIntervalMillis
         this.schedule(null, true)
     }
@@ -93,7 +63,8 @@ class RullerJS {
             this.currentTimer = null
         }
         this.rullerWSURL = null
-        this.randomBackoffMaxMillis = null
+        this.backoffMinMillis = null
+        this.backoffMaxMillis = null
         this.maxRetryIntervalMillis = null
         if(this.ws!=null) {
             this.ws.close()
@@ -106,7 +77,6 @@ class RullerJS {
             this.currentTimer = null
         }
 
-        // console.log("RullerJS: Polling ruller...")
         fetch(this.rullerURL, {
             method: 'POST',
             headers: {
@@ -125,14 +95,13 @@ class RullerJS {
             .then((data) => {
                 // console.log("RullerJS: got response: " + data)
                 let ndata = JSON.stringify(data)
+                if(this.cacheMillis>0) {
+                    localStorage.setItem("rullerjs:lastData", JSON.stringify({time:new Date().getTime(), data: data}))
+                }
                 if(this.previousData == null || (JSON.stringify(this.previousData) != ndata)) {
                     console.log("RullerJS flags: " + ndata);
                     this.onChange(data)
                     this.previousData = data
-
-                    if(this.cacheMillis>0) {
-                        localStorage.setItem("rullerjs:lastData", JSON.stringify({time:new Date().getTime(), data: data}))
-                    }
                 }
                 this.schedule(null, applySchedule)
             }).catch((err) => {
@@ -156,46 +125,15 @@ class RullerJS {
             if(this.onErr) {
                 this.onErr(lastErr)
             }
+            this.notifyIfValidCache()
         }
 
         //LOCALSTORAGE CACHE
         if(!applySchedule) {
-            if(lastErr && this.cacheMillis>0) {
-
-                let cachedData = localStorage.getItem("rullerjs:lastData")
-                if(cachedData==null) {
-                    return
-                }
-
-                let lcache = null
-                try {
-                    lcache = JSON.parse(cachedData)
-                } catch (err) {
-                    console.log("RullerJS: error parsing localstorage cache data. err=" + err)
-                    return
-                }
-
-                if(lcache.data==null || lcache.time==null) {
-                    return
-                }
-
-                let elapsedCache = (new Date().getTime()-lcache.time)
-                if(!(elapsedCache <= this.cacheMillis)) {
-                    console.log("RullerJS: cache expired")
-                    localStorage.removeItem("rullerjs:lastData")
-                    return
-                }
-
-                if(this.previousData == null || (JSON.stringify(this.previousData) != JSON.stringify(lcache.data))) {
-                    console.log("RullerJS flags (cached): " + lcache.data);
-                    this.onChange(lcache.data)
-                    this.previousData = lcache.data
-                }
-            }
             return
         }
 
-        if(this.pollIntervalMillis == null && this.rullerWSURL == null) {
+        if(this.rullerWSURL == null) {
             return
         }
 
@@ -218,16 +156,12 @@ class RullerJS {
         //define first retry random backoff to avoid too much pressure on server when
         //it restarts so that not all clients would connect back at the same time
         if(this.retryCount > 0) {
-            let minInterval = this.pollIntervalMillis
-            if(minInterval == null) {
-                minInterval = Math.min(3000, this.randomBackoffMaxMillis)
-            }
             if(this.retryCount == 1) {
                 // console.log("Random backoff retry delay")
-                this.retryWaitTime = getRandomIntInclusive(minInterval, this.randomBackoffMaxMillis)
+                this.retryWaitTime = getRandomIntInclusive(this.backoffMinMillis, this.backoffMaxMillis)
             } else if(this.retryCount == 2) {
                 // console.log("retryCount==2")
-                this.retryWaitTime = minInterval
+                this.retryWaitTime = this.backoffMinMillis
             } else {
                 // console.log("retryCount>2")
                 this.retryWaitTime = Math.min(this.retryWaitTime * 2, this.maxRetryIntervalMillis)
@@ -239,16 +173,7 @@ class RullerJS {
             return
         }
 
-        //POLLING FOR CHANGES
-        if(this.pollIntervalMillis != null) {
-            // console.log("Polling in " + this.pollIntervalMillis + "ms")
-            this.pending = true
-            if(this.pollIntervalMillis>=1000) {
-                this.currentTimer = setTimeout(() => this.poll(true), this.pollIntervalMillis)
-            }
-        }
-
-        //MONITOR WS CLOSE FOR CHANGES
+        //MONITOR WS CLOSED
         if(this.rullerWSURL != null) {
             var ws = new WebSocket(this.rullerWSURL);
             ws.onopen = () => {
@@ -264,6 +189,43 @@ class RullerJS {
             this.ws = ws
         }
     }
+
+    notifyIfValidCache() {
+        if(this.cacheMillis==0) {
+            return
+        }
+    
+        let cachedData = localStorage.getItem("rullerjs:lastData")
+        if(cachedData==null) {
+            return
+        }
+    
+        let lcache = null
+        try {
+            lcache = JSON.parse(cachedData)
+        } catch (err) {
+            console.log("RullerJS: error parsing localstorage cache data. err=" + err)
+            return
+        }
+    
+        if(lcache.data==null || lcache.time==null) {
+            return
+        }
+    
+        let elapsedCache = (new Date().getTime()-lcache.time)
+        if(!(elapsedCache <= this.cacheMillis)) {
+            console.log("RullerJS: cache expired")
+            localStorage.removeItem("rullerjs:lastData")
+            lcache.data = null
+        }
+    
+        if(this.previousData == null || (JSON.stringify(this.previousData) != JSON.stringify(lcache.data))) {
+            console.log("RullerJS flags (cached): " + lcache.data);
+            this.onChange(lcache.data)
+            this.previousData = lcache.data
+        }
+    }
+    
 }
 
 function getRandomIntInclusive(min, max) {
@@ -271,3 +233,4 @@ function getRandomIntInclusive(min, max) {
     max = Math.floor(max);
     return Math.floor(Math.random() * (max - min + 1)) + min;
 }
+

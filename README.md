@@ -2,7 +2,7 @@
 
 A client for change detection of feature flags for Ruller
 
-See a very simple demo at https://youtu.be/ScWwz1zUasI
+See a basic demo at https://youtu.be/y7fLrfypvzU
 
 ## Usage
 
@@ -14,29 +14,13 @@ cd ruller-sample-feature-flag
 docker-compose up --build -d
 ```
 
-* Register RullerJS for invoking feature flag service and keep it up with changes by polling the service each 1s (bad for scalling!)
-
-```js
-let input = {customerid: "123"}
-r = new RullerJS("http://127.0.0.1:8080/rules/domains", 
-    input,
-    0,
-    (output) => {
-        console.log("OUTPUT CHANGED: " + JSON.stringify(output))
-        document.getElementById("status").innerText = JSON.stringify(output)
-    }, (err) => {
-        console.log("ERROR: " + err)
-    });
-r.startPolling(1000)
-```
-
-* Register RullerJS for invoking feature flag service and keep it up with changes by monitoring a webservice (great for scale but requires an environment that supports websockets). When the ws closes, it will try to get newer flags.
+* Register RullerJS for invoking feature flag service and keep it up with changes by monitoring a webservice connection. When the ws closes, it will try to get newer flags, because it may indicate that the flag server has restarted with new rules.
 
 ```js
 let input = {customerid: "123"}
 r = new RullerJS("http://127.0.0.1:8080/rules/domains",
     input,
-    0,
+    10000,
     (output) => {
         console.log("OUTPUT CHANGED: " + JSON.stringify(output))
         document.getElementById("status").innerText = JSON.stringify(output)
@@ -63,15 +47,17 @@ r.startMonitoring("ws://127.0.0.1:8080/ws")
 * *onError* - callback function invoked when an error occurs during ruller service requests. Having an error here doesn't mean RullerJS will stop trying to reconnect if it is monitoring or polling the endpoint. If you want to stop trying, call RullerJS.stopMonitoring() or RullerJS.stopPolling().
 
 
-### RullerJS.startMonitoring(rullerWSURL, randomBackoffMaxMillis, maxRetryIntervalMillis)
+### RullerJS.startMonitoring(rullerWSURL, backoffMinMillis, backoffMaxMillis, maxRetryIntervalMillis)
 
 * Useful for detecting ruller service changes without the need to poll the service periodically. This will start monitoring a Websocket endpoint and if it is closed, will retry connecting to the ruller service to get newer data.
 
 * *rullerWSURL* - Websocket URL used for monitoring "closes". Ex.: "ws://myflags.site.com/ws". Use the same ruller websocket service as the POST service so that when your service is restarted, the new configurations will be fetched.
 
-* *randomBackoffMaxMillis* - When trying to reconnect to the ruller service, wait for a random time at the first retry so that the not all clients will execute a DDoS on servers. This value defines the max time in randomization.
+* *backoffMinMillis* - When trying to reconnect to the ruller service, wait for a random time at the first retry so that the not all clients will execute a DDoS on servers. This value defines the min time in randomization. After the first backoff, this will be used as the initial value for retries
 
-* *maxRetryIntervalMillis* - At each failed retry, the time to wait before trying again will double. This is the max time to wait before retrying, limiting the "doubling".
+* *randomBackoffMaxMillis* - As in *backoffMinMillis*, this determines the max time in random backoff.
+
+* *maxRetryIntervalMillis* - At each failed retry, the time to wait before trying again will double. This is the max time to wait, limiting the "doubling".
 
 ### RullerJS.stopMonitoring()
 
